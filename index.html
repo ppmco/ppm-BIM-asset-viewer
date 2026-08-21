@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PPM Asset Viewer · Store 63981</title>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "web-ifc": "https://esm.sh/web-ifc@0.0.68"
+  }
+}
+</script>
+
+<style>
+  :root {
+    --viewport-bg: #191c22;
+    --viewport-grid: #2a2e37;
+    --panel-bg: #ffffff;
+    --panel-alt: #f4f6f9;
+    --ink: #1a1d23;
+    --ink-soft: #5b6472;
+    --ink-faint: #8b95a4;
+    --line: #e3e7ee;
+    --accent: #0e7490;
+    --accent-deep: #0b5566;
+    --hl: #ff8c42;
+    --ok: #1a8f5a;
+    --warn: #b4791f;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--viewport-bg);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+
+  /* ---- Header ---- */
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 0 18px;
+    background: #12151a;
+    border-bottom: 1px solid #000;
+    color: #e8ecf2;
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: baseline; gap: 9px; }
+  .brand .mark {
+    font-family: var(--mono); font-weight: 700; font-size: 15px;
+    letter-spacing: .5px; color: #fff;
+  }
+  .brand .mark span { color: var(--accent); }
+  .brand .sub { font-size: 11px; color: var(--ink-faint); letter-spacing: .3px; }
+  .store-chip {
+    margin-left: 2px;
+    font-family: var(--mono); font-size: 12px;
+    background: #1e232b; border: 1px solid #2c333d;
+    padding: 4px 10px; border-radius: 5px; color: #cfd6e0;
+  }
+  .store-chip b { color: var(--hl); font-weight: 600; }
+  .head-spacer { flex: 1; }
+  .head-stat { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); }
+  .head-stat b { color: #cfd6e0; font-weight: 600; }
+
+  /* ---- Body split ---- */
+  #body { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
+
+  #viewport { position: relative; background: var(--viewport-bg); overflow: hidden; }
+  #three-canvas { display: block; width: 100%; height: 100%; }
+
+  .vp-hint {
+    position: absolute; left: 14px; bottom: 12px;
+    font-size: 11px; color: #5a626e; font-family: var(--mono);
+    pointer-events: none; user-select: none;
+  }
+
+  /* ---- Loading ---- */
+  #loader {
+    position: absolute; inset: 0; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; background: var(--viewport-bg);
+    transition: opacity .5s ease; color: #aeb6c2;
+  }
+  #loader.hide { opacity: 0; pointer-events: none; }
+  .spin {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 3px solid #2c313b; border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loader .msg { font-family: var(--mono); font-size: 12.5px; letter-spacing: .3px; }
+  #loader .bar { width: 220px; height: 3px; background: #262b34; border-radius: 3px; overflow: hidden; }
+  #loader .bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width .3s ease; }
+
+  /* ---- Panel ---- */
+  #panel {
+    background: var(--panel-bg);
+    border-left: 1px solid #000;
+    display: grid; grid-template-rows: auto 1fr;
+    min-height: 0;
+  }
+
+  .search-wrap { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel-alt); }
+  .search-wrap input {
+    width: 100%; font-family: var(--mono); font-size: 13px;
+    padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px;
+    background: #fff; color: var(--ink); outline: none;
+  }
+  .search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(14,116,144,.12); }
+
+  #panel-scroll { overflow-y: auto; min-height: 0; }
+
+  /* asset list */
+  .list-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 12px 16px 6px; }
+  .list-head .t { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--ink-faint); font-weight: 600; }
+  .list-head .c { font-size: 11px; font-family: var(--mono); color: var(--ink-faint); }
+
+  .sys-group { padding: 4px 0; }
+  .sys-label {
+    padding: 8px 16px 4px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: .6px; color: var(--accent-deep); text-transform: uppercase;
+  }
+  .asset-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 16px; cursor: pointer; border-left: 3px solid transparent;
+  }
+  .asset-row:hover { background: var(--panel-alt); }
+  .asset-row.active { background: #e6f3f6; border-left-color: var(--accent); }
+  .asset-row .id { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  .asset-row .meta { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot.geo { background: var(--accent); }
+  .dot.photo { background: var(--hl); }
+  .dot.off { background: #d3d9e2; }
+  .asset-row .cam { font-size: 10px; font-family: var(--mono); color: var(--ink-faint); }
+
+  /* detail */
+  #detail { display: none; }
+  #detail.show { display: block; }
+  .detail-head {
+    padding: 16px 16px 14px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: #fff; z-index: 2;
+  }
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--accent); cursor: pointer; margin-bottom: 12px;
+    font-weight: 600; letter-spacing: .2px; background: none; border: none; padding: 0;
+  }
+  .back-btn:hover { color: var(--accent-deep); }
+  .asset-id-big { font-family: var(--mono); font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+  .asset-sub { font-size: 12px; color: var(--ink-soft); margin-top: 3px; line-height: 1.4; }
+  .badges { margin-top: 10px; display: flex; gap: 7px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10.5px; font-family: var(--mono); padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--line); color: var(--ink-soft); background: var(--panel-alt);
+  }
+  .badge.geo { color: var(--accent-deep); border-color: #b9dee6; background: #e6f3f6; }
+  .badge.photo { color: #a2560f; border-color: #f3d3b4; background: #fdf1e6; }
+
+  .group { padding: 6px 16px 2px; }
+  .group-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--accent-deep); font-weight: 700; padding: 14px 0 8px;
+    border-bottom: 1px solid var(--line); margin-bottom: 6px;
+  }
+  .kv { display: grid; grid-template-columns: 128px 1fr; gap: 4px 10px; padding: 5px 0; align-items: start; }
+  .kv .k { font-size: 12px; color: var(--ink-soft); }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; color: var(--ink); word-break: break-word; line-height: 1.45; }
+  .kv .v.empty { color: var(--ink-faint); font-style: italic; font-family: var(--sans); font-size: 12px; }
+
+  .empty-note {
+    margin: 18px 16px; padding: 14px; border: 1px dashed var(--line);
+    border-radius: 8px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5;
+    background: var(--panel-alt);
+  }
+  .empty-note b { color: var(--ink); font-weight: 600; }
+
+  /* photos */
+  .photos-wrap { padding: 6px 16px 24px; }
+  .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .thumb {
+    aspect-ratio: 1; border-radius: 6px; overflow: hidden; cursor: pointer;
+    background: var(--panel-alt); border: 1px solid var(--line); position: relative;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s ease; }
+  .thumb:hover img { transform: scale(1.06); }
+  .thumb .idx {
+    position: absolute; bottom: 3px; right: 4px; font-family: var(--mono);
+    font-size: 9px; color: #fff; background: rgba(0,0,0,.55); padding: 1px 4px; border-radius: 3px;
+  }
+
+  /* lightbox */
+  #lightbox {
+    position: fixed; inset: 0; z-index: 100; background: rgba(10,12,16,.94);
+    display: none; align-items: center; justify-content: center; flex-direction: column;
+  }
+  #lightbox.show { display: flex; }
+  #lightbox img { max-width: 92vw; max-height: 84vh; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .lb-bar { margin-top: 14px; display: flex; align-items: center; gap: 20px; color: #cfd6e0; font-family: var(--mono); font-size: 12px; }
+  .lb-btn { cursor: pointer; user-select: none; padding: 6px 14px; border: 1px solid #3a414d; border-radius: 6px; background: #1a1e25; color: #e8ecf2; font-size: 13px; }
+  .lb-btn:hover { border-color: var(--accent); }
+  .lb-close { position: absolute; top: 20px; right: 26px; font-size: 26px; color: #cfd6e0; cursor: pointer; line-height: 1; }
+  .lb-close:hover { color: #fff; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: #cfd6e0; border-radius: 6px; border: 2px solid #fff; }
+  ::-webkit-scrollbar-thumb:hover { background: #b3bcca; }
+</style>
+</head>
+
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="mark">PPM<span>·</span>TWIN</div>
+      <div class="sub">Asset Viewer</div>
+    </div>
+    <div class="store-chip">STORE <b>63981</b> · Geneva IL</div>
+    <div class="head-spacer"></div>
+    <div class="head-stat" id="head-stat"></div>
+  </header>
+
+  <div id="body">
+    <div id="viewport">
+      <canvas id="three-canvas"></canvas>
+      <div class="vp-hint">drag orbit · scroll zoom · click element to inspect</div>
+      <div id="loader">
+        <div class="spin"></div>
+        <div class="msg" id="loader-msg">Starting engine…</div>
+        <div class="bar"><i id="loader-bar"></i></div>
+      </div>
+    </div>
+
+    <div id="panel">
+      <div class="search-wrap">
+        <input id="search" type="text" placeholder="Search asset ID…  (e.g. RTU-01)" autocomplete="off" />
+      </div>
+      <div id="panel-scroll">
+        <!-- list view -->
+        <div id="list-view">
+          <div class="list-head">
+            <div class="t">Assets</div>
+            <div class="c" id="list-count"></div>
+          </div>
+          <div id="asset-list"></div>
+        </div>
+        <!-- detail view -->
+        <div id="detail"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="lightbox">
+  <div class="lb-close" id="lb-close">&times;</div>
+  <img id="lb-img" src="" alt="" />
+  <div class="lb-bar">
+    <div class="lb-btn" id="lb-prev">‹ Prev</div>
+    <div id="lb-count"></div>
+    <div class="lb-btn" id="lb-next">Next ›</div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import * as WebIFC from "web-ifc";
+
+// ---------- config ----------
+const IFC_URL = "63981.ifc";
+const PHOTOS_JSON = "photos.json";
+const PHOTOS_DIR = "photos/";
+const WASM_PATH = "https://unpkg.com/web-ifc@0.0.68/";
+
+// system prefix -> friendly label for grouping the asset list
+const SYSTEM_LABELS = {
+  RTU:"HVAC", EF:"HVAC", SD:"HVAC", RR:"HVAC", THER:"HVAC",
+  EPNL:"Electrical", ELEC:"Electrical", EBOX:"Electrical", ETR:"Electrical",
+  EMTR:"Electrical", GMTR:"Plumbing/Gas", EMLT:"Life Safety", EXIT:"Life Safety",
+  STRB:"Life Safety", SMKD:"Life Safety", PULL:"Life Safety", FEX:"Life Safety",
+  SPR:"Fire Protection", FDEV:"Fire Protection", FALM:"Fire Protection",
+  WH:"Plumbing", BFP:"Plumbing", SINK:"Plumbing", MSINK:"Plumbing", TOIL:"Plumbing",
+  DF:"Plumbing", FD:"Plumbing", RD:"Plumbing", GB:"Plumbing", RV:"Plumbing",
+};
+const TMO_ORDER = ["Identity","Survey","Electrical","Mechanical","Plumbing","LifeSafety"];
+
+// ---------- state ----------
+let ifcAPI, modelID;
+let mergedMesh = null, colorAttr = null, originalColors = null;
+let positions = null;
+let normalsArr = null;
+const vRanges = {};          // expressID -> [{vStart, vCount}]
+const faceExpressID = [];    // per-triangle expressID
+const elementPsets = {};     // expressID -> [psetID]
+const markToExpress = {};    // "RTU-01" -> expressID
+const expressToMark = {};    // expressID -> "RTU-01"
+const dataCache = {};        // expressID -> {mark, psets}
+let photos = {};             // "RTU-01" -> [filenames]
+let selected = null;
+
+// three.js
+let scene, camera, renderer, controls, raycaster;
+const HL_COLOR = new THREE.Color(0xff8c42);
+
+const $ = (id) => document.getElementById(id);
+const setLoader = (msg, pct) => { $("loader-msg").textContent = msg; if (pct!=null) $("loader-bar").style.width = pct+"%"; };
+
+// ==========================================================
+init().catch(err => { console.error(err); setLoader("Error: " + err.message, 100); });
+
+async function init() {
+  setupThree();
+
+  setLoader("Loading photo manifest…", 6);
+  try { photos = await (await fetch(PHOTOS_JSON)).json(); }
+  catch(e) { console.warn("photos.json not found", e); photos = {}; }
+
+  setLoader("Starting IFC engine…", 12);
+  ifcAPI = new WebIFC.IfcAPI();
+  ifcAPI.SetWasmPath(WASM_PATH, true);
+  await ifcAPI.Init();
+
+  setLoader("Downloading model…", 20);
+  const buf = await (await fetch(IFC_URL)).arrayBuffer();
+
+  setLoader("Parsing IFC…", 34);
+  modelID = ifcAPI.OpenModel(new Uint8Array(buf), { COORDINATE_TO_ORIGIN: true });
+
+  setLoader("Building geometry…", 46);
+  await buildGeometry();
+
+  setLoader("Indexing properties…", 74);
+  buildPropertyIndex();
+
+  setLoader("Resolving asset tags…", 86);
+  resolveMarks();
+
+  setLoader("Ready", 100);
+  renderAssetList();
+  updateHeadStat();
+  setTimeout(() => $("loader").classList.add("hide"), 250);
+
+  animate();
+}
+
+// ---------- three.js scene ----------
+function setupThree() {
+  const vp = $("viewport");
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x191c22);
+
+  camera = new THREE.PerspectiveCamera(55, vp.clientWidth/vp.clientHeight, 0.1, 5000);
+  camera.position.set(30, 30, 30);
+
+  renderer = new THREE.WebGLRenderer({ canvas: $("three-canvas"), antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.8); d1.position.set(50, 80, 40); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0x99bbdd, 0.35); d2.position.set(-40, 30, -50); scene.add(d2);
+
+  const grid = new THREE.GridHelper(200, 40, 0x2a2e37, 0x23262d);
+  grid.position.y = -0.01; scene.add(grid);
+
+  raycaster = new THREE.Raycaster();
+
+  window.addEventListener("resize", () => {
+    camera.aspect = vp.clientWidth/vp.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(vp.clientWidth, vp.clientHeight);
+  });
+
+  // click vs drag detection
+  let downPos = null;
+  renderer.domElement.addEventListener("pointerdown", e => downPos = {x:e.clientX, y:e.clientY});
+  renderer.domElement.addEventListener("pointerup", e => {
+    if (!downPos) return;
+    const dx = e.clientX-downPos.x, dy = e.clientY-downPos.y;
+    if (Math.hypot(dx,dy) < 5) onPick(e);
+    downPos = null;
+  });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ---------- geometry ----------
+async function buildGeometry() {
+  const posArr = [], normArr = [], colArr = [], idxArr = [];
+  let vOffset = 0;
+
+  ifcAPI.StreamAllMeshes(modelID, (mesh) => {
+    const expressID = mesh.expressID;
+    const geoms = mesh.geometries;
+    const size = geoms.size();
+    for (let i = 0; i < size; i++) {
+      const placed = geoms.get(i);
+      const g = ifcAPI.GetGeometry(modelID, placed.geometryExpressID);
+      const verts = ifcAPI.GetVertexArray(g.GetVertexData(), g.GetVertexDataSize());
+      const idx = ifcAPI.GetIndexArray(g.GetIndexData(), g.GetIndexDataSize());
+      const m = placed.flatTransformation;         // 16, column-major
+      const c = placed.color;                       // {x,y,z,w}
+      const cr = c ? c.x : 0.72, cg = c ? c.y : 0.74, cb = c ? c.z : 0.78;
+
+      const nV = verts.length / 6;
+      const vStart = vOffset;
+      for (let k = 0; k < nV; k++) {
+        const px=verts[k*6], py=verts[k*6+1], pz=verts[k*6+2];
+        const nx=verts[k*6+3], ny=verts[k*6+4], nz=verts[k*6+5];
+        // transform position (column-major m)
+        posArr.push(
+          m[0]*px + m[4]*py + m[8]*pz + m[12],
+          m[1]*px + m[5]*py + m[9]*pz + m[13],
+          m[2]*px + m[6]*py + m[10]*pz + m[14]
+        );
+        // transform normal (upper 3x3)
+        let tnx = m[0]*nx + m[4]*ny + m[8]*nz;
+        let tny = m[1]*nx + m[5]*ny + m[9]*nz;
+        let tnz = m[2]*nx + m[6]*ny + m[10]*nz;
+        const len = Math.hypot(tnx,tny,tnz) || 1;
+        normArr.push(tnx/len, tny/len, tnz/len);
+        colArr.push(cr, cg, cb);
+      }
+      for (let k = 0; k < idx.length; k++) idxArr.push(idx[k] + vOffset);
+      const nTri = idx.length / 3;
+      for (let t = 0; t < nTri; t++) faceExpressID.push(expressID);
+
+      (vRanges[expressID] || (vRanges[expressID] = [])).push({ vStart, vCount: nV });
+      vOffset += nV;
+      g.delete();
+    }
+  });
+
+  positions = new Float32Array(posArr);
+  normalsArr = new Float32Array(normArr);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normArr), 3));
+  colorAttr = new THREE.BufferAttribute(new Float32Array(colArr), 3);
+  geometry.setAttribute("color", colorAttr);
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(idxArr), 1));
+  originalColors = colorAttr.array.slice(0);
+
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  mergedMesh = new THREE.Mesh(geometry, mat);
+  scene.add(mergedMesh);
+
+  frameObject(geometry);
+}
+
+function frameObject(geometry) {
+  geometry.computeBoundingSphere();
+  const s = geometry.boundingSphere;
+  if (!s) return;
+  const r = s.radius || 20;
+  const c = s.center;
+  controls.target.copy(c);
+  camera.position.set(c.x + r*1.4, c.y + r*1.2, c.z + r*1.4);
+  camera.near = r/100; camera.far = r*20; camera.updateProjectionMatrix();
+  controls.update();
+}
+
+// ---------- properties ----------
+function buildPropertyIndex() {
+  const rels = ifcAPI.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYPROPERTIES);
+  for (let i = 0; i < rels.size(); i++) {
+    const rel = ifcAPI.GetLine(modelID, rels.get(i));
+    const pdef = rel.RelatingPropertyDefinition;
+    const objs = rel.RelatedObjects;
+    if (!pdef || !objs) continue;
+    for (const o of objs) {
+      const eid = o.value;
+      (elementPsets[eid] || (elementPsets[eid] = [])).push(pdef.value);
+    }
+  }
+}
+
+function getElementData(expressID) {
+  if (dataCache[expressID]) return dataCache[expressID];
+  const psetIDs = elementPsets[expressID] || [];
+  const psets = {}; let mark = null;
+  for (const pid of psetIDs) {
+    let pset; try { pset = ifcAPI.GetLine(modelID, pid); } catch(e){ continue; }
+    if (!pset || !pset.HasProperties) continue;
+    const pname = pset.Name && pset.Name.value ? pset.Name.value : "";
+    const props = {};
+    for (const pr of pset.HasProperties) {
+      let prop; try { prop = ifcAPI.GetLine(modelID, pr.value); } catch(e){ continue; }
+      if (!prop || !prop.Name) continue;
+      const k = prop.Name.value;
+      const v = prop.NominalValue && prop.NominalValue.value != null ? prop.NominalValue.value : "";
+      props[k] = v;
+      if (k === "Mark" && v) mark = v;
+    }
+    psets[pname] = props;
+  }
+  let name = null;
+  try { const el = ifcAPI.GetLine(modelID, expressID); name = el && el.Name ? el.Name.value : null; } catch(e){}
+  const out = { mark, psets, name };
+  dataCache[expressID] = out;
+  return out;
+}
+
+function resolveMarks() {
+  // resolve Mark only for elements that actually have geometry
+  for (const eidStr of Object.keys(vRanges)) {
+    const eid = parseInt(eidStr, 10);
+    const psetIDs = elementPsets[eid];
+    if (!psetIDs) continue;
+    let mark = null;
+    for (const pid of psetIDs) {
+      let pset; try { pset = ifcAPI.GetLine(modelID, pid); } catch(e){ continue; }
+      if (!pset || !pset.HasProperties) continue;
+      for (const pr of pset.HasProperties) {
+        let prop; try { prop = ifcAPI.GetLine(modelID, pr.value); } catch(e){ continue; }
+        if (prop && prop.Name && prop.Name.value === "Mark" && prop.NominalValue && prop.NominalValue.value) {
+          mark = prop.NominalValue.value; break;
+        }
+      }
+      if (mark) break;
+    }
+    if (mark) { markToExpress[mark] = eid; expressToMark[eid] = mark; }
+  }
+}
+
+// ---------- picking ----------
+function onPick(e) {
+  if (!mergedMesh) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((e.clientX-rect.left)/rect.width)*2 - 1,
+    -((e.clientY-rect.top)/rect.height)*2 + 1
+  );
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObject(mergedMesh, false);
+  if (!hits.length) { return; }
+  const faceIndex = hits[0].faceIndex;
+  const eid = faceExpressID[faceIndex];
+  if (eid == null) return;
+  selectElement(eid, false);
+}
+
+// ---------- selection + highlight ----------
+function highlight(expressID) {
+  // restore
+  colorAttr.array.set(originalColors);
+  // apply
+  const ranges = vRanges[expressID] || [];
+  for (const r of ranges) {
+    for (let i = 0; i < r.vCount; i++) {
+      const ci = (r.vStart + i) * 3;
+      colorAttr.array[ci] = HL_COLOR.r;
+      colorAttr.array[ci+1] = HL_COLOR.g;
+      colorAttr.array[ci+2] = HL_COLOR.b;
+    }
+  }
+  colorAttr.needsUpdate = true;
+}
+
+function clearHighlight() {
+  if (!colorAttr) return;
+  colorAttr.array.set(originalColors);
+  colorAttr.needsUpdate = true;
+}
+
+function frameElement(expressID) {
+  const ranges = vRanges[expressID]; if (!ranges) return;
+  const box = new THREE.Box3(); const v = new THREE.Vector3();
+  const avgN = new THREE.Vector3();
+  for (const r of ranges) {
+    for (let i = 0; i < r.vCount; i++) {
+      const pi = (r.vStart + i) * 3;
+      v.set(positions[pi], positions[pi+1], positions[pi+2]);
+      box.expandByPoint(v);
+      if (normalsArr) { avgN.x += normalsArr[pi]; avgN.y += normalsArr[pi+1]; avgN.z += normalsArr[pi+2]; }
+    }
+  }
+  if (box.isEmpty()) return;
+
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z);
+
+  // Distance sized to fit the box footprint from above, with a floor for tiny items.
+  const dist = Math.max(radius * 1.6, 1.5);
+
+  // Keep a top-down tilt, but rotate around the object to find a sightline
+  // that isn't blocked by a wall. Test 12 angles; pick the first clear one,
+  // else the most open one.
+  const UP = 1.0;        // vertical weight (higher = more straight-down)
+  const HORIZ = 0.5;     // horizontal weight (higher = more 3/4 angle)
+  const steps = 12;
+  let bestDir = null, bestClear = -Infinity;
+
+  // First choice: view from the side the element faces (its normal points into the room).
+  // Only fall back to the rotational search if that facing side is actually blocked.
+  let facingDir = null;
+  if (avgN.lengthSq() > 0.001) {
+    facingDir = avgN.clone().normalize();
+    facingDir.y = Math.max(facingDir.y, 0);            // never from below
+    facingDir.y += UP * 0.6;                            // add top-down bias
+    facingDir.normalize();
+
+    const fOrigin = c.clone().addScaledVector(facingDir, radius * 0.6 + 0.05);
+    raycaster.set(fOrigin, facingDir.clone());
+    raycaster.far = dist;
+    const fHits = mergedMesh ? raycaster.intersectObject(mergedMesh, false) : [];
+    const fBlock = fHits.find(h => h.distance > radius * 0.3);
+    raycaster.far = Infinity;
+    if (!fBlock) { facingDir = facingDir; }             // clear — keep it
+    else { facingDir = null; }                          // blocked — fall through to search
+  }
+
+  for (let s = 0; s < steps; s++) {
+    const theta = (s / steps) * Math.PI * 2;
+    const cand = new THREE.Vector3(Math.cos(theta) * HORIZ, UP, Math.sin(theta) * HORIZ).normalize();
+
+    // ray from just outside the element, along the candidate direction toward the camera spot
+    const origin = c.clone().addScaledVector(cand, radius * 0.6 + 0.05);
+    raycaster.set(origin, cand.clone());
+    raycaster.far = dist;
+    const hits = mergedMesh ? raycaster.intersectObject(mergedMesh, false) : [];
+    const block = hits.find(h => h.distance > radius * 0.3);
+    const clearDist = block ? block.distance : dist;
+
+    if (!block) { bestDir = cand; break; }           // fully clear — take it
+    if (clearDist > bestClear) { bestClear = clearDist; bestDir = cand; }  // track most open
+  }
+  raycaster.far = Infinity;
+
+  const dir = facingDir || bestDir || new THREE.Vector3(0.35, 1, 0.35).normalize();
+
+  controls.target.copy(c);
+  camera.position.copy(c).addScaledVector(dir, dist);
+  camera.near = Math.max(0.01, dist / 100);
+  camera.far = Math.max(camera.far, dist * 50);
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function selectElement(expressID, fromList) {
+  selected = expressID;
+  highlight(expressID);
+  frameElement(expressID);
+  renderDetail(expressID);
+  // sync list active state
+  document.querySelectorAll(".asset-row").forEach(el => {
+    el.classList.toggle("active", parseInt(el.dataset.eid,10) === expressID);
+  });
+}
+
+// ---------- asset list ----------
+function prefixOf(id){ const m = id.match(/^([A-Za-z]+)/); return m ? m[1].toUpperCase() : "OTHER"; }
+
+function allAssetIds() {
+  // union of marks-with-geometry and photo keys
+  const set = new Set([...Object.keys(markToExpress), ...Object.keys(photos)]);
+  return [...set].sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+}
+
+function renderAssetList(filter="") {
+  const host = $("asset-list"); host.innerHTML = "";
+  const ids = allAssetIds().filter(id => id.toLowerCase().includes(filter.toLowerCase()));
+  $("list-count").textContent = ids.length + " shown";
+
+  // group by system label
+  const groups = {};
+  for (const id of ids) {
+    const label = SYSTEM_LABELS[prefixOf(id)] || "Other";
+    (groups[label] || (groups[label] = [])).push(id);
+  }
+  const order = ["HVAC","Electrical","Plumbing","Plumbing/Gas","Fire Protection","Life Safety","Other"];
+  const labels = Object.keys(groups).sort((a,b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+
+  for (const label of labels) {
+    const g = document.createElement("div"); g.className = "sys-group";
+    const l = document.createElement("div"); l.className = "sys-label"; l.textContent = label;
+    g.appendChild(l);
+    for (const id of groups[label]) {
+      const eid = markToExpress[id];
+      const hasGeo = eid != null;
+      const nPhotos = (photos[id] || []).length;
+      const row = document.createElement("div");
+      row.className = "asset-row";
+      if (hasGeo) row.dataset.eid = eid;
+      row.innerHTML = `
+        <span class="id">${id}</span>
+        <span class="meta">
+          ${nPhotos ? `<span class="cam">${nPhotos}\u25a3</span>` : ``}
+          <span class="dot ${hasGeo?'geo':'off'}" title="${hasGeo?'in 3D':'no 3D element'}"></span>
+          <span class="dot ${nPhotos?'photo':'off'}" title="${nPhotos?nPhotos+' photos':'no photos'}"></span>
+        </span>`;
+      row.addEventListener("click", () => {
+        if (hasGeo) selectElement(eid, true);
+        else selectOrphan(id);
+      });
+      g.appendChild(row);
+    }
+    host.appendChild(g);
+  }
+}
+
+// ---------- detail ----------
+function showList() {
+  $("detail").classList.remove("show");
+  $("list-view").style.display = "block";
+  clearHighlight(); selected = null;
+  document.querySelectorAll(".asset-row").forEach(el => el.classList.remove("active"));
+}
+
+function detailShell(id, subtitle, badges) {
+  $("list-view").style.display = "none";
+  const d = $("detail"); d.classList.add("show");
+  return `
+    <div class="detail-head">
+      <button class="back-btn" id="back">&larr; All assets</button>
+      <div class="asset-id-big">${id || "(no tag)"}</div>
+      <div class="asset-sub">${subtitle||""}</div>
+      <div class="badges">${badges}</div>
+    </div>`;
+}
+
+function renderDetail(expressID) {
+  const data = getElementData(expressID);
+  const id = data.mark || expressToMark[expressID] || null;
+  const nPhotos = (id && photos[id]) ? photos[id].length : 0;
+
+  const tmo = {};
+  for (const [pname, props] of Object.entries(data.psets)) {
+    if (pname.startsWith("Pset_TMO_")) tmo[pname.replace("Pset_TMO_","")] = props;
+  }
+  const hasTMO = Object.keys(tmo).length > 0;
+
+  let badges = `<span class="badge geo">in 3D model</span>`;
+  if (nPhotos) badges += `<span class="badge photo">${nPhotos} photo${nPhotos>1?'s':''}</span>`;
+
+  let html = detailShell(id, data.name ? esc(data.name) : "", badges);
+
+  if (hasTMO) {
+    for (const key of [...TMO_ORDER, ...Object.keys(tmo).filter(k=>!TMO_ORDER.includes(k))]) {
+      if (!tmo[key]) continue;
+      const props = tmo[key];
+      const rows = Object.entries(props)
+        .filter(([k])=>k!=="Mark")
+        .map(([k,v]) => `<div class="kv"><div class="k">${esc(k.replace(/_/g,' '))}</div>${
+          v!=="" ? `<div class="v">${esc(String(v))}</div>` : `<div class="v empty">—</div>`}</div>`)
+        .join("");
+      if (rows.trim()) html += `<div class="group"><div class="group-label">${esc(key)}</div>${rows}</div>`;
+    }
+  } else {
+    html += `<div class="empty-note">No TMO survey data attached to this element. It's part of the model geometry but wasn't in the asset survey set.</div>`;
+  }
+
+  // photos
+  if (nPhotos) {
+    html += `<div class="photos-wrap"><div class="group-label">Photos</div><div class="photo-grid" id="photo-grid"></div></div>`;
+  } else if (id) {
+    html += `<div class="empty-note">No photos on file for <b>${esc(id)}</b>.</div>`;
+  }
+
+  $("detail").innerHTML = html;
+  $("back").addEventListener("click", showList);
+  if (nPhotos) renderPhotos(id);
+}
+
+function selectOrphan(id) {
+  // asset that has photos but no geometry (e.g. RTU-03)
+  clearHighlight(); selected = null;
+  const nPhotos = (photos[id]||[]).length;
+  let badges = `<span class="badge">no 3D element</span>`;
+  if (nPhotos) badges += `<span class="badge photo">${nPhotos} photo${nPhotos>1?'s':''}</span>`;
+  let html = detailShell(id, "Data-only asset — not located in the 3D model", badges);
+  html += `<div class="empty-note">This asset was documented on site but has no geometry in the model (e.g. an adjacent-tenant unit or a survey-only record).</div>`;
+  if (nPhotos) html += `<div class="photos-wrap"><div class="group-label">Photos</div><div class="photo-grid" id="photo-grid"></div></div>`;
+  $("detail").innerHTML = html;
+  $("back").addEventListener("click", showList);
+  if (nPhotos) renderPhotos(id);
+  document.querySelectorAll(".asset-row").forEach(el => el.classList.remove("active"));
+}
+
+// ---------- photos + lightbox ----------
+let lbList = [], lbIndex = 0;
+
+function renderPhotos(id) {
+  const list = photos[id] || [];
+  const grid = $("photo-grid"); if (!grid) return;
+  grid.innerHTML = "";
+  list.forEach((fn, i) => {
+    const t = document.createElement("div"); t.className = "thumb";
+    t.innerHTML = `<img loading="lazy" src="${PHOTOS_DIR}${encodeURIComponent(fn)}" alt="${id} ${i+1}"><span class="idx">${i+1}</span>`;
+    t.addEventListener("click", () => openLightbox(list, i, id));
+    grid.appendChild(t);
+  });
+}
+
+function openLightbox(list, index, id) {
+  lbList = list.map(fn => PHOTOS_DIR + encodeURIComponent(fn));
+  lbIndex = index;
+  updateLightbox(id);
+  $("lightbox").classList.add("show");
+}
+function updateLightbox(id) {
+  $("lb-img").src = lbList[lbIndex];
+  $("lb-count").textContent = `${id? id+'  ':''}${lbIndex+1} / ${lbList.length}`;
+}
+function closeLightbox(){ $("lightbox").classList.remove("show"); }
+function lbStep(d){ lbIndex = (lbIndex + d + lbList.length) % lbList.length; $("lb-img").src = lbList[lbIndex]; $("lb-count").textContent = `${lbIndex+1} / ${lbList.length}`; }
+
+$("lb-close").addEventListener("click", closeLightbox);
+$("lb-prev").addEventListener("click", () => lbStep(-1));
+$("lb-next").addEventListener("click", () => lbStep(1));
+$("lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") closeLightbox(); });
+window.addEventListener("keydown", e => {
+  if (!$("lightbox").classList.contains("show")) return;
+  if (e.key === "Escape") closeLightbox();
+  if (e.key === "ArrowLeft") lbStep(-1);
+  if (e.key === "ArrowRight") lbStep(1);
+});
+
+// ---------- misc ----------
+$("search").addEventListener("input", e => renderAssetList(e.target.value.trim()));
+
+function updateHeadStat() {
+  const geo = Object.keys(markToExpress).length;
+  const withPhotos = Object.keys(photos).length;
+  $("head-stat").innerHTML = `<b>${geo}</b> tagged in 3D · <b>${withPhotos}</b> with photos`;
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
